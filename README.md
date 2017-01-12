@@ -147,7 +147,7 @@ acme.sh --installcert -d example.com \
 --certpath      /path/to/certfile/in/apache/cert.pem  \
 --keypath       /path/to/keyfile/in/apache/key.pem  \
 --fullchainpath /path/to/fullchain/certfile/apache/fullchain.pem \
---reloadcmd     "service apache2 restart"
+--reloadcmd     "service apache2 force-reload"
 ```
 
 **Nginx** example:
@@ -155,10 +155,12 @@ acme.sh --installcert -d example.com \
 acme.sh --installcert -d example.com \
 --keypath       /path/to/keyfile/in/nginx/key.pem  \
 --fullchainpath /path/to/fullchain/nginx/cert.pem \
---reloadcmd     "service nginx restart"
+--reloadcmd     "service nginx force-reload"
 ```
 
 Only the domain is required, all the other parameters are optional.
+
+The ownership and permission info of existing files are preserved. You may want to precreate the files to have defined ownership and permission.
 
 Install/copy the issued cert/key to the production Apache or Nginx path.
 
@@ -263,6 +265,7 @@ You don't have to do anything manually!
 1. nsupdate API
 1. aliyun.com(阿里云) API
 1. ISPConfig 3.1 API
+1. Alwaysdata.com API
 
 **More APIs coming soon...**
 
@@ -321,7 +324,7 @@ acme.sh --renew -d example.com --force --ecc
 
 # 11. How to upgrade `acme.sh`
 
-acme.sh is in constant developement, so it's strongly recommended to use the latest code.
+acme.sh is in constant development, so it's strongly recommended to use the latest code.
 
 You can update acme.sh to the latest code:
 

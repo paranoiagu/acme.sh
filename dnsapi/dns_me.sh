@@ -81,7 +81,7 @@ dns_me_rm() {
 
 }
 
-####################  Private functions bellow ##################################
+####################  Private functions below ##################################
 #_acme-challenge.www.domain.com
 #returns
 # _sub_domain=_acme-challenge.www
@@ -103,7 +103,7 @@ _get_root() {
     fi
 
     if _contains "$response" "\"name\":\"$h\""; then
-      _domain_id=$(printf "%s\n" "$response" | _egrep_o "\"id\":[^,]*" | head -n 1 | cut -d : -f 2)
+      _domain_id=$(printf "%s\n" "$response" | _egrep_o "\"id\":[^,]*" | head -n 1 | cut -d : -f 2 | tr -d '}')
       if [ "$_domain_id" ]; then
         _sub_domain=$(printf "%s" "$domain" | cut -d . -f 1-$p)
         _domain="$h"

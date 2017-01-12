@@ -405,9 +405,12 @@ _getfile() {
 
 #Usage: multiline
 _base64() {
+  [ "" ] #urgly
   if [ "$1" ]; then
+    _debug3 "base64 multiline:'$1'"
     $OPENSSL_BIN base64 -e
   else
+    _debug3 "base64 single line."
     $OPENSSL_BIN base64 -e | tr -d '\r\n'
   fi
 }
@@ -570,7 +573,7 @@ _createkey() {
 _is_idn() {
   _is_idn_d="$1"
   _debug2 _is_idn_d "$_is_idn_d"
-  _idn_temp=$(printf "%s" "$_is_idn_d" | tr -d '[0-9]' | tr -d '[a-z]' | tr -d '[A-Z]' | tr -d '.,-')
+  _idn_temp=$(printf "%s" "$_is_idn_d" | tr -d '0-9' | tr -d 'a-z' | tr -d 'A-Z' | tr -d '.,-')
   _debug2 _idn_temp "$_idn_temp"
   [ "$_idn_temp" ]
 }
@@ -635,8 +638,9 @@ _createcsr() {
     _info "Multi domain" "$alt"
     printf -- "\nsubjectAltName=$alt" >>"$csrconf"
   fi
-  if [ "$Le_OCSP_Stable" ]; then
-    _savedomainconf Le_OCSP_Stable "$Le_OCSP_Stable"
+  if [ "$Le_OCSP_Staple" ] || [ "$Le_OCSP_Stable" ]; then
+    _savedomainconf Le_OCSP_Staple "$Le_OCSP_Staple"
+    _cleardomainconf Le_OCSP_Stable
     printf -- "\nbasicConstraints = CA:FALSE\n1.3.6.1.5.5.7.1.24=DER:30:03:02:01:05" >>"$csrconf"
   fi
 
@@ -932,6 +936,8 @@ _calcjwk() {
     modulus=$($OPENSSL_BIN rsa -in "$keyfile" -modulus -noout | cut -d '=' -f 2)
     _debug3 modulus "$modulus"
     n="$(printf "%s" "$modulus" | _h2b | _base64 | _urlencode)"
+    _debug3 n "$n"
+
     jwk='{"e": "'$e'", "kty": "RSA", "n": "'$n'"}'
     _debug3 jwk "$jwk"
 
@@ -1913,7 +1919,7 @@ _setApache() {
   fi
   _info "JFYI, Config file $httpdconf is backuped to $APACHE_CONF_BACKUP_DIR/$httpdconfname"
   _info "In case there is an error that can not be restored automatically, you may try restore it yourself."
-  _info "The backup file will be deleted on sucess, just forget it."
+  _info "The backup file will be deleted on success, just forget it."
 
   #add alias
 
@@ -2069,6 +2075,17 @@ _clearupwebbroot() {
 
 _on_before_issue() {
   _debug _on_before_issue
+  #run pre hook
+  if [ "$Le_PreHook" ]; then
+    _info "Run pre hook:'$Le_PreHook'"
+    if ! (
+      cd "$DOMAIN_PATH" && eval "$Le_PreHook"
+    ); then
+      _err "Error when run pre hook."
+      return 1
+    fi
+  fi
+
   if _hasfield "$Le_Webroot" "$NO_VALUE"; then
     if ! _exists "nc"; then
       _err "Please install netcat(nc) tools first."
@@ -2136,16 +2153,6 @@ _on_before_issue() {
     usingApache=""
   fi
 
-  #run pre hook
-  if [ "$Le_PreHook" ]; then
-    _info "Run pre hook:'$Le_PreHook'"
-    if ! (
-      cd "$DOMAIN_PATH" && eval "$Le_PreHook"
-    ); then
-      _err "Error when run pre hook."
-      return 1
-    fi
-  fi
 }
 
 _on_issue_err() {
@@ -2220,11 +2227,13 @@ _regAccount() {
   _reg_length="$1"
 
   if [ ! -f "$ACCOUNT_KEY_PATH" ] && [ -f "$_OLD_ACCOUNT_KEY" ]; then
+    mkdir -p "$CA_DIR"
     _info "mv $_OLD_ACCOUNT_KEY to $ACCOUNT_KEY_PATH"
     mv "$_OLD_ACCOUNT_KEY" "$ACCOUNT_KEY_PATH"
   fi
 
   if [ ! -f "$ACCOUNT_JSON_PATH" ] && [ -f "$_OLD_ACCOUNT_JSON" ]; then
+    mkdir -p "$CA_DIR"
     _info "mv $_OLD_ACCOUNT_JSON to $ACCOUNT_JSON_PATH"
     mv "$_OLD_ACCOUNT_JSON" "$ACCOUNT_JSON_PATH"
   fi
@@ -2346,6 +2355,12 @@ __get_domain_new_authz() {
     if ! _send_signed_request "$API/acme/new-authz" "{\"resource\": \"new-authz\", \"identifier\": {\"type\": \"dns\", \"value\": \"$(_idn "$_gdnd")\"}}"; then
       _err "Can not get domain new authz."
       return 1
+    fi
+    if _contains "$response" "No registration exists matching provided key"; then
+      _err "It seems there is an error, but it's recovered now, please try again."
+      _err "If you see this message for a second time, please report bug: $(__green "$PROJECT")"
+      _clearcaconf "CA_KEY_HASH"
+      break
     fi
     if ! _contains "$response" "An error occurred while processing your request"; then
       _info "The new-authz request is ok."
@@ -3352,7 +3367,7 @@ installcronjob() {
       _err "Can not install cronjob, $PROJECT_ENTRY not found."
       return 1
     fi
-    if _exists uname && uname -a | grep solaris >/dev/null; then
+    if _exists uname && uname -a | grep SunOS >/dev/null; then
       crontab -l | {
         cat
         echo "0 0 * * * $lesh --cron --home \"$LE_WORKING_DIR\" > /dev/null"
@@ -3780,7 +3795,7 @@ install() {
   if [ -z "$NO_DETECT_SH" ]; then
     #Modify shebang
     if _exists bash; then
-      _info "Good, bash is found, so change the shebang to use bash as prefered."
+      _info "Good, bash is found, so change the shebang to use bash as preferred."
       _shebang='#!/usr/bin/env bash'
       _setShebang "$LE_WORKING_DIR/$PROJECT_ENTRY" "$_shebang"
       for subf in $_SUB_FOLDERS; do
@@ -3970,7 +3985,10 @@ _installOnline() {
   fi
   (
     _info "Extracting $localname"
-    tar xzf $localname
+    if ! (tar xzf $localname || gtar xzf $localname); then
+      _err "Extraction error."
+      exit 1
+    fi
 
     cd "$PROJECT_NAME-$BRANCH"
     chmod +x $PROJECT_ENTRY
@@ -4361,7 +4379,7 @@ _process() {
         shift
         ;;
       --ocsp-must-staple | --ocsp)
-        Le_OCSP_Stable="1"
+        Le_OCSP_Staple="1"
         ;;
       --log | --logfile)
         _log="1"
